@@ -5,6 +5,7 @@
             [chordtrainer.theory :as t]
             [chordtrainer.audio :as audio]
             [chordtrainer.stats :as stats]
+            [chordtrainer.sketch :as sketch]
             [chordtrainer.storage :as storage]
             [chordtrainer.midi :as midi]))
 
@@ -23,7 +24,18 @@
    :auto-advance true
    :adaptive true
    :midi false
-   :midi-echo false})
+   :midi-echo false
+   :imagine-root true})
+
+(def default-sketch
+  {:name "Example"
+   :text "Em9 | Em9/D | Cmaj7#11 | B7alt\nAm9 | D13 | Gmaj7 | F#m7b5 B7b9"
+   :tempo 96
+   :beats 4
+   :comp :charleston
+   :bass true
+   :loop true
+   :voice-lead true})
 
 (def initial-db
   {:view :puzzle
@@ -35,13 +47,24 @@
    :round 0
    :running false
    :session-start (js/Date.now)
+   :sketch default-sketch
+   :sketches []
+   :sketch-play {:playing false :token 0 :pos nil}
+   :stats-filter :all
    :midi {:state :off :inputs [] :held #{} :collected #{}}})
 
 ;; ---------------------------------------------------------------- effects
 
-(rf/reg-fx :audio/play (fn [events] (audio/stop-all!) (audio/play-events! events)))
+(rf/reg-fx :audio/play
+  (fn [x]
+    (let [{:keys [events voices]} (if (map? x) x {:events x})]
+      (audio/stop-all!)
+      (audio/play-events! events voices))))
 (rf/reg-fx :audio/stop (fn [_] (audio/stop-all!)))
-(rf/reg-fx :later (fn [{:keys [ms event]}] (js/setTimeout #(rf/dispatch event) ms)))
+(rf/reg-fx :later
+  (fn [x]
+    (doseq [{:keys [ms event]} (if (map? x) [x] x)]
+      (js/setTimeout #(rf/dispatch event) ms))))
 (rf/reg-fx :save (fn [kvs] (doseq [[k v] kvs] (storage/save! k v))))
 (rf/reg-fx :midi/connect (fn [on?] (if on? (midi/connect!) (midi/disconnect!))))
 
@@ -73,9 +96,15 @@
     :naturals (rand-nth t/natural-pcs)
     (rand-int 12)))
 
-(defn- next-question [{:keys [settings attempts current]}]
+(def recognition-modes #{:puzzle :training})
+
+(defn- next-question
+  "Weights come from attempts in `modes`, so imagining and recognizing track separately."
+  [{:keys [settings attempts current]} modes]
   (let [p (pool settings)
-        w (if (:adaptive settings) (stats/weight-fn attempts) (constantly 1))
+        w (if (:adaptive settings)
+            (stats/weight-fn (filter #(modes (:mode %)) attempts))
+            (constantly 1))
         weighted (for [[c invs] p inv invs]
                    [[(:id c) inv] (/ (w (:id c) inv) (count invs))])
         draw (fn []
@@ -110,9 +139,11 @@
     {:db initial-db}))
 
 (rf/reg-event-fx :storage/loaded
-  (fn [{:keys [db]} [_ {:keys [settings attempts]}]]
+  (fn [{:keys [db]} [_ {:keys [settings attempts sketch sketches]}]]
     (let [s (merge default-settings settings)]
-      (cond-> {:db (assoc db :settings s :attempts (vec attempts) :loaded? true)}
+      (cond-> {:db (assoc db :settings s :attempts (vec attempts) :loaded? true
+                          :sketch (merge default-sketch sketch)
+                          :sketches (vec sketches))}
         (:midi s) (assoc :midi/connect true)))))
 
 (rf/reg-event-db :audio/loaded
@@ -122,8 +153,11 @@
   (fn [{:keys [db]} [_ v]]
     (if (= v (:view db))
       {:db db}
-      {:db (assoc db :view v :running false :phase :idle :current nil :answer nil
-                  :error nil :flash nil :round (inc (:round db)))
+      {:db (-> db
+               (assoc :view v :running false :phase :idle :current nil :answer nil
+                      :error nil :flash nil :round (inc (:round db)))
+               (update :sketch-play assoc :playing false :pos nil)
+               (update-in [:sketch-play :token] inc))
        :audio/stop true})))
 
 ;; ---------------------------------------------------------------- settings
@@ -155,7 +189,7 @@
 (rf/reg-event-fx :puzzle/next
   [(rf/inject-cofx :now)]
   (fn [{:keys [db now]} _]
-    (if-let [q (next-question db)]
+    (if-let [q (next-question db recognition-modes)]
       (let [tl (timeline (assoc db :current q) (:notes q))]
         {:db (assoc db
                     :current (assoc q :started (+ now (* 1000 (:length tl))))
@@ -230,7 +264,7 @@
 
 (rf/reg-event-fx :training/next
   (fn [{:keys [db]} _]
-    (if-let [q (next-question db)]
+    (if-let [q (next-question db recognition-modes)]
       (let [round (inc (:round db))
             tl (timeline (assoc db :current q) (:notes q))
             wait (* 1000 (+ (:length tl) (get-in db [:settings :pause])))]
@@ -267,6 +301,122 @@
                                       :correct correct :via :self})]
         {:db (assoc db :graded correct)
          :save {:attempts attempts}}))))
+
+;; ---------------------------------------------------------------- imagine
+
+(rf/reg-event-fx :imagine/next
+  (fn [{:keys [db]} _]
+    (if-let [q (next-question db #{:imagine})]
+      (cond-> {:db (assoc db :current q :phase :imagine :graded nil :error nil)}
+        (get-in db [:settings :imagine-root])
+        (assoc :audio/play [[(t/root-midi (:root q)) 0 1.4]]))
+      {:db (assoc db :error "No chords match your settings — enable some chords or inversions.")})))
+
+(rf/reg-event-fx :imagine/hear
+  (fn [{:keys [db]} _]
+    (when-let [notes (get-in db [:current :notes])]
+      {:db (assoc db :phase :imagine-heard)
+       :audio/play (:events (timeline db notes {:root-ref false}))})))
+
+(rf/reg-event-fx :imagine/grade
+  [(rf/inject-cofx :now)]
+  (fn [{:keys [db now]} [_ correct]]
+    (when (and (= :imagine-heard (:phase db)) (nil? (:graded db)))
+      (let [{:keys [chord inv root]} (:current db)
+            [db attempts] (record db {:t now :mode :imagine :chord chord :inv inv :root root
+                                      :correct correct :via :self})]
+        {:db (assoc db :graded correct)
+         :save {:attempts attempts}}))))
+
+;; ---------------------------------------------------------------- sketchpad
+
+(defn- save-sketch [db] {:db db :save {:sketch (:sketch db)}})
+
+(rf/reg-event-fx :sketch/set
+  (fn [{:keys [db]} [_ k v]]
+    (save-sketch (assoc-in db [:sketch k] v))))
+
+(rf/reg-event-fx :sketch/transpose
+  (fn [{:keys [db]} [_ n]]
+    (save-sketch (update-in db [:sketch :text] sketch/transpose-text n))))
+
+(defn- realize [db] (sketch/realize (:sketch db) (get-in db [:settings :voicing])))
+
+(rf/reg-event-fx :sketch/play
+  (fn [{:keys [db]} _]
+    (let [slots (realize db)
+          {:keys [events length marks voices]} (sketch/schedule slots (:sketch db))
+          token (inc (get-in db [:sketch-play :token]))]
+      (if (empty? events)
+        {:db (assoc db :error "Nothing to play — type some chords like  Dm9 | G13 | Cmaj9")}
+        {:db (assoc db :sketch-play {:playing true :token token :pos 0} :error nil)
+         :audio/play {:events events :voices voices}
+         :later (into [{:ms (* 1000 length) :event [:sketch/end token]}]
+                      (map-indexed (fn [i t] {:ms (* 1000 t) :event [:sketch/at token i]}) marks))}))))
+
+(rf/reg-event-db :sketch/at
+  (fn [db [_ token i]]
+    (if (= token (get-in db [:sketch-play :token]))
+      (assoc-in db [:sketch-play :pos] i)
+      db)))
+
+(rf/reg-event-fx :sketch/end
+  (fn [{:keys [db]} [_ token]]
+    (when (and (= token (get-in db [:sketch-play :token])) (get-in db [:sketch-play :playing]))
+      (if (get-in db [:sketch :loop])
+        {:dispatch [:sketch/play]}
+        {:db (update db :sketch-play assoc :playing false :pos nil)}))))
+
+(rf/reg-event-fx :sketch/stop
+  (fn [{:keys [db]} _]
+    {:db (-> db
+             (update :sketch-play assoc :playing false :pos nil)
+             (update-in [:sketch-play :token] inc))
+     :audio/stop true}))
+
+(rf/reg-event-fx :sketch/select
+  (fn [{:keys [db]} [_ i]]
+    (let [{:keys [bass-note upper error]} (get (realize db) i)
+          db (-> db
+                 (assoc :sketch-sel i)
+                 (update :sketch-play assoc :playing false :pos nil)
+                 (update-in [:sketch-play :token] inc))]
+      (if error
+        {:db db}
+        {:db db :audio/play (map (fn [m] [m 0 2.2]) (cons bass-note upper))}))))
+
+(rf/reg-event-fx :sketch/save
+  (fn [{:keys [db]} _]
+    (let [sk (:sketch db)
+          sketches (->> (:sketches db)
+                        (remove #(= (:name %) (:name sk)))
+                        (cons sk)
+                        (sort-by :name)
+                        vec)]
+      {:db (assoc db :sketches sketches :flash (str "Saved “" (:name sk) "”."))
+       :save {:sketches sketches}})))
+
+(rf/reg-event-fx :sketch/load
+  (fn [{:keys [db]} [_ nm]]
+    (when-let [sk (first (filter #(= nm (:name %)) (:sketches db)))]
+      (save-sketch (-> db
+                       (assoc :sketch (merge default-sketch sk) :sketch-sel nil :flash nil)
+                       (update :sketch-play assoc :playing false :pos nil)
+                       (update-in [:sketch-play :token] inc))))))
+
+(rf/reg-event-fx :sketch/delete
+  (fn [{:keys [db]} _]
+    (let [nm (get-in db [:sketch :name])
+          sketches (vec (remove #(= nm (:name %)) (:sketches db)))]
+      {:db (assoc db :sketches sketches :flash (str "Deleted “" nm "”."))
+       :save {:sketches sketches}})))
+
+(rf/reg-event-fx :sketch/new
+  (fn [{:keys [db]} _]
+    (save-sketch (assoc db :sketch (assoc default-sketch :name "Untitled" :text "") :sketch-sel nil :flash nil))))
+
+(rf/reg-event-db :stats/filter
+  (fn [db [_ f]] (assoc db :stats-filter f)))
 
 ;; ---------------------------------------------------------------- midi
 
@@ -348,4 +498,14 @@
                               (= :revealed phase) {:dispatch [:training/next]}
                               :else {:dispatch [:training/reveal (:round db)]})
         [:training "r"] {:dispatch [:hear-root]}
+        [:training "y"] {:dispatch [:training/grade true]}
+        [:training "n"] {:dispatch [:training/grade false]}
+        [:imagine "Enter"] (case phase
+                             :imagine {:dispatch [:imagine/hear]}
+                             {:dispatch [:imagine/next]})
+        [:imagine " "] (when (= :imagine-heard phase) {:dispatch [:imagine/hear]})
+        [:imagine "r"] {:dispatch [:hear-root]}
+        [:imagine "y"] {:dispatch [:imagine/grade true]}
+        [:imagine "n"] {:dispatch [:imagine/grade false]}
+        [:sketch " "] {:dispatch (if (get-in db [:sketch-play :playing]) [:sketch/stop] [:sketch/play])}
         nil))))

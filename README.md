@@ -7,9 +7,12 @@ Ear-training for chord qualities beyond plain triads: 7ths, sus/add, extensions 
 - **Train**: a chord plays, you get a thinking pause, then it is revealed (name, formula, keyboard) and replayed. Optionally self-grade with ✓ / ✗ to feed the stats.
 - **Puzzle**: a chord plays and the app waits for your answer: quality, plus inversion when more than one is enabled. Answer by tapping, or by playing it on a MIDI keyboard. After answering you can play your answer and A/B compare it with the real one.
 
+- **Imagine**: the reverse direction. You see a chord symbol (and optionally hear its root), imagine the sound, then play it and grade whether it matched. Tracked separately from hearing in stats and adaptive selection.
+- **Sketch**: a progression sketchpad for arranging away from the instrument. Type `Em9 | A13 | Cmaj7#11 | B7alt` (bars with `|` or new lines, several chords per bar with spaces, `%` repeats a bar) and loop it. Options: comping (whole notes, Charleston, four-to-the-bar, arpeggio), tempo, 3 or 4 beats per bar, a 2-feel bass, and voice leading, which moves each chord to the nearest position. Tap a chord to hear it alone and see its voicing. Transpose by semitones and save sketches by name.
+
 Settings cover the chord set (with presets), root mode (fixed / random naturals / random all 12), inversions, close or spread voicing, block / arpeggio / arp-then-block playback, optional root reference, and adaptive selection, which drills your weakest chords more often (based on smoothed recent error rate per chord and per chord + inversion).
 
-Keyboard: `Enter` start/next/reveal, `Space` replay, `R` hear root, `C` compare.
+Keyboard: `Enter` start/next/reveal, `Space` replay (play/stop in Sketch), `R` hear root, `C` compare, `Y`/`N` self-grade.
 
 ### Inversions on bigger chords
 

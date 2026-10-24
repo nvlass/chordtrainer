@@ -19,13 +19,13 @@
 (defn- on-key [e]
   (let [tag (some-> (.-target e) .-tagName str/lower-case)]
     (when-not (or (#{"input" "select" "textarea"} tag) (.-metaKey e) (.-ctrlKey e) (.-altKey e))
-      (when (#{" " "Enter" "r" "c"} (.-key e))
+      (when (#{" " "Enter" "r" "c" "y" "n"} (.-key e))
         (when (#{" " "Enter"} (.-key e)) (.preventDefault e))
         (rf/dispatch [:key (.-key e)])))))
 
 (defn init []
   (rf/dispatch-sync [:init])
-  (storage/load-all! [:settings :attempts] #(rf/dispatch [:storage/loaded %]))
+  (storage/load-all! [:settings :attempts :sketch :sketches] #(rf/dispatch [:storage/loaded %]))
   (audio/install-unlock!)
   (audio/load! #(rf/dispatch [:audio/loaded %]))
   (.addEventListener js/document "keydown" on-key)

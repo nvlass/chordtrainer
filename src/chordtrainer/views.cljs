@@ -259,12 +259,15 @@
   (let [{:keys [n acc avg-ms]} (<sub [:stats/overall])
         conf (<sub [:stats/confusions])]
     [:section
+     [:div.stats-filter
+      [seg [[:all "All"] [:recognition "Hearing"] [:imagine "Imagining"]]
+       (<sub [:stats-filter]) #(>evt [:stats/filter %])]]
      [:div.tiles
       [:div.tile [:small "Answers"] [:b n]]
       [:div.tile [:small "Accuracy"] [:b (pct acc)]]
       [:div.tile [:small "Avg time"] [:b (secs avg-ms)]]]
      (if (zero? n)
-       [:div.card [:p "No stats yet. Answer some puzzles (or self-grade in training) and your weak spots will show up here. "
+       [:div.card [:p "No stats yet. Answer some puzzles (or self-grade in training / imagine) and your weak spots will show up here. "
                    "With “adaptive” on, the trainer plays your weak chords more often."]]
        [:<>
         [daily-chart]
@@ -369,7 +372,9 @@
      [:div.card
       [:h3 "Selection"]
       [toggle "Adaptive — drill weak chords more" (:adaptive s) (setter :adaptive)
-       "weights chords by your recent error rate"]]
+       "weights chords by your recent error rate (hearing and imagining are tracked separately)"]
+      [toggle "Imagine: play the root when showing a chord" (:imagine-root s) (setter :imagine-root)
+       "an anchor pitch to imagine the chord from"]]
      [:div.card
       [:h3 "MIDI keyboard"]
       [toggle "Use MIDI input" (:midi s) (setter :midi)
@@ -385,9 +390,131 @@
          [toggle "Sound notes I play" (:midi-echo s) (setter :midi-echo)
           "for silent controllers"]])]]))
 
+;; ---------------------------------------------------------------- imagine
+
+(defn imagine-view []
+  (let [phase (<sub [:phase])
+        {:keys [chord inv root notes] :as cur} (<sub [:current])
+        graded (<sub [:graded])
+        c (t/chord-by-id chord)]
+    [:section
+     [error-banner]
+     (if (#{:imagine :imagine-heard} phase)
+       [:div
+        [:div.topline [:div.root-row
+                       [:span.pill "Root " [:b (t/note-names root)]]
+                       [:button.ghost {:on-click #(>evt [:hear-root])} "Hear root"]]]
+        (if (= :imagine phase)
+          [:div.card.reveal
+           [:div.chord-name (t/chord-name c root inv)]
+           [:div.chord-sub (:name c) " · " (t/inversion-label c inv)]
+           [:div.formula (t/formula c)]
+           [:p.imagine-prompt "Hear it in your head — bass first, then the top note, then the colour in between. "
+            "Sing or hum it if you can."]
+           [:div.actions [:button.primary {:on-click #(>evt [:imagine/hear])} "Hear it (Enter)"]]]
+          [chord-card cur
+           [:div.actions
+            [:button {:on-click #(>evt [:imagine/hear])} "▶ Again"]
+            [:button.good {:disabled (some? graded) :class (when (true? graded) "on")
+                           :on-click #(>evt [:imagine/grade true])} "✓ Matched (Y)"]
+            [:button.bad {:disabled (some? graded) :class (when (false? graded) "on")
+                          :on-click #(>evt [:imagine/grade false])} "✗ Different (N)"]
+            [:button.primary {:on-click #(>evt [:imagine/next])} "Next →"]]])]
+       [:div.start
+        [:h2 "Imagine"]
+        [:p "The reverse direction: you see a chord symbol, imagine how it sounds, then check."]
+        [:button.primary.big {:on-click #(>evt [:imagine/next])} "Start"]
+        [:p.hint "Keys: Enter hear / next · Space again · R root · Y / N grade"]])]))
+
+;; ---------------------------------------------------------------- sketchpad
+
+(def comp-styles [[:whole "Whole"] [:charleston "Charleston"] [:four "Four"] [:arp "Arpeggio"]])
+
+(defn sketch-file []
+  (let [sk (<sub [:sketch])
+        saved (<sub [:sketches])
+        exists? (some #(= (:name sk) (:name %)) saved)]
+    [:div.card
+     [:div.file-row
+      [:input.name {:value (:name sk) :aria-label "Sketch name"
+                    :on-change #(>evt [:sketch/set :name (.. % -target -value)])}]
+      [:button {:on-click #(>evt [:sketch/save])} "Save"]
+      [:button.ghost {:on-click #(>evt [:sketch/new])} "New"]
+      (when exists? [:button.ghost {:on-click #(>evt [:sketch/delete])} "Delete"])]
+     (when (seq saved)
+       [:div.chips
+        (for [{nm :name} saved]
+          ^{:key nm}
+          [:button.chip {:class (when (= nm (:name sk)) "on") :on-click #(>evt [:sketch/load nm])} nm])])
+     (when-let [f (<sub [:flash])] [:p.hint f])]))
+
+(defn sketch-bars []
+  (let [slots (<sub [:sketch/slots])
+        pos (:pos (<sub [:sketch-play]))
+        sel (<sub [:sketch-sel])]
+    (when (seq slots)
+      [:div.bars
+       (for [[bar items] (group-by :bar (map-indexed #(assoc %2 :i %1) slots))]
+         ^{:key bar}
+         [:div.bar-cell
+          (for [{:keys [i token error]} items]
+            ^{:key i}
+            [:button.slot {:class [(when error "err") (when (= i pos) "now") (when (= i sel) "sel")]
+                           :title (when error "Unknown chord symbol")
+                           :on-click #(>evt [:sketch/select i])}
+             token])])])))
+
+(defn sketch-selected []
+  (let [slots (<sub [:sketch/slots])
+        sel (<sub [:sketch-sel])
+        {:keys [chord root bass-note upper error token]} (when sel (get slots sel))]
+    (when (and chord (not error))
+      (let [c (t/chord-by-id chord)]
+        [:div.card
+         [:div.chord-name token]
+         [:div.chord-sub (:name c)]
+         [:div.formula (t/formula c)]
+         [piano {:notes (vec (cons bass-note upper)) :bass bass-note}]]))))
+
+(defn sketch-view []
+  (let [sk (<sub [:sketch])
+        playing (:playing (<sub [:sketch-play]))
+        errors (filter :error (<sub [:sketch/slots]))
+        setter (fn [k] #(>evt [:sketch/set k %]))]
+    [:section
+     [error-banner]
+     [sketch-file]
+     [:div.card
+      [:textarea.prog {:value (:text sk) :rows 4 :spell-check false :auto-capitalize "off"
+                       :auto-correct "off" :placeholder "Dm9 | G13 | Cmaj9 | A7alt"
+                       :on-change #(>evt [:sketch/set :text (.. % -target -value)])}]
+      [:p.hint "Bars with | or new lines, several chords per bar with spaces, % repeats a bar. "
+       "Symbols like Cmaj7 CΔ7 Dm9 D-9 F#ø Bb13/D G7alt C6/9."]
+      (when (seq errors)
+        [:p.hint.err-text "Unknown: " (str/join ", " (distinct (map :token errors)))])
+      [sketch-bars]
+      [:div.actions
+       (if playing
+         [:button.primary {:on-click #(>evt [:sketch/stop])} "■ Stop"]
+         [:button.primary {:on-click #(>evt [:sketch/play])} "▶ Play"])
+       [:button.ghost {:on-click #(>evt [:sketch/transpose -1])} "♭ −1"]
+       [:button.ghost {:on-click #(>evt [:sketch/transpose 1])} "♯ +1"]]]
+     [sketch-selected]
+     [:div.card
+      [:h3 "Playback"]
+      [:div.field [:span "Comping"] [seg comp-styles (:comp sk) (setter :comp)]]
+      [slider "Tempo" (:tempo sk) 40 220 2 " bpm" (setter :tempo)]
+      [:div.field [:span "Beats per bar"] [seg [[3 "3"] [4 "4"]] (:beats sk) (setter :beats)]]
+      [toggle "Bass in 2 (root, then 5th)" (:bass sk) (setter :bass)]
+      [toggle "Voice leading" (:voice-lead sk) (setter :voice-lead)
+       "move each chord to the nearest position instead of jumping"]
+      [toggle "Loop" (:loop sk) (setter :loop)]
+      [:p.hint "Close / spread voicing comes from Settings → Sound."]]]))
+
 ;; ---------------------------------------------------------------- app
 
-(def tabs [[:training "Train"] [:puzzle "Puzzle"] [:stats "Stats"] [:settings "Settings"]])
+(def tabs [[:training "Train"] [:puzzle "Puzzle"] [:imagine "Imagine"] [:sketch "Sketch"]
+           [:stats "Stats"] [:settings "⚙"]])
 
 (defn app []
   (let [view (<sub [:view])
@@ -399,12 +526,15 @@
      [:nav
       (for [[v label] tabs]
         ^{:key v}
-        [:button {:class (when (= v view) "on") :on-click #(>evt [:set-view v])} label])]
+        [:button {:class (when (= v view) "on") :aria-label (name v)
+                  :on-click #(>evt [:set-view v])} label])]
      (when (nil? samples) [:div.banner "Loading piano samples…"])
      (when (zero? samples) [:div.banner.warn "Couldn't load piano samples."])
      [:main
       (case view
         :training [training-view]
         :puzzle [puzzle-view]
+        :imagine [imagine-view]
+        :sketch [sketch-view]
         :stats [stats-view]
         :settings [settings-view])]]))

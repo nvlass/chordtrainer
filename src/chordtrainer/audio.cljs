@@ -113,10 +113,12 @@
           {:events [] :length 0}
           timelines))
 
-(defn play-events! [events]
+(defn play-events!
+  "`voices` is how many notes sound together; defaults to the distinct pitches in `events`."
+  [events & [voices]]
   (let [c (context)
         t0 (+ (.-currentTime c) 0.05)
-        gain (/ 0.6 (Math/sqrt (max 1 (count (distinct (map first events))))))]
+        gain (/ 0.6 (Math/sqrt (max 1 (or voices (count (distinct (map first events)))))))]
     (doseq [[m off dur] events]
       (play-note! m (+ t0 off) dur gain))))
 
