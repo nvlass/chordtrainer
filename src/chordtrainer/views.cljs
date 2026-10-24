@@ -135,6 +135,12 @@
                                         (when (> (count (<sub [:inv-choices])) 1)
                                           (str " · " (t/inversion-short answer-inv))))]])
       [:span.meta (secs ms) (when (= via :midi) " · via MIDI")]]
+     (when-not correct
+       (when-let [{r :root nm :name} (t/same-notes-elsewhere (t/chord-by-id (:chord cur)) (:root cur)
+                                                             (:inv cur) a)]
+         [:div.banner.insight
+          "Same notes as " [:b nm] " — you heard " [:b (t/note-names r)] " as the root. "
+          "The root here is " [:b (t/note-names (:root cur))] "."]))
      [chord-card cur
       [:div.actions
        [:button {:on-click #(>evt [:replay])} "▶ Play it"]

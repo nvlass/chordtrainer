@@ -40,3 +40,8 @@
 (deftest equivalence
   (is (t/same-sound? 0 [(c :dom7s5) 0] [(c :dom7b13) 0]))
   (is (not (t/same-sound? 0 [(c :dom7) 0] [(c :dom7) 1]))))
+
+(deftest same-notes-hint
+  (is (= {:root 0 :name "Csus2/G"} (t/same-notes-elsewhere (c :sus4) 7 0 (c :sus2))))
+  (is (= {:root 9 :name "Am7/C"} (t/same-notes-elsewhere (c :maj6) 0 0 (c :m7))))
+  (is (nil? (t/same-notes-elsewhere (c :dom7) 0 0 (c :maj7)))))

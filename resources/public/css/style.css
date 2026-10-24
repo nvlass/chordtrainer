@@ -311,3 +311,4 @@ button.slot {
 button.slot.now { background: var(--accent); color: var(--accent-ink); }
 button.slot.sel { border-color: var(--accent); }
 button.slot.err { color: var(--bad); border-color: var(--bad); border-style: dashed; }
+.banner.insight { background: var(--accent-soft); }

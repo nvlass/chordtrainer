@@ -179,3 +179,18 @@
 
 (defn note-name [midi]
   (str (note-names (mod midi 12)) (dec (quot midi 12))))
+
+(defn same-notes-elsewhere
+  "When `answer` (any inversion) has the target's exact notes over a different root,
+   returns {:root r :name \"Csus2/G\"} spelled with the target's actual bass."
+  [target root inv answer]
+  (let [p (pcs target root)
+        b (bass-pc target root inv)]
+    (first
+     (for [r (range 12)
+           :when (and (not= r root) (= p (pcs answer r)))
+           :let [i (first (filter #(= b (bass-pc answer r %)) (inversions answer)))]]
+       {:root r
+        :name (if i
+                (chord-name answer r i)
+                (str (note-names r) (:sym answer) "/" (note-names b)))}))))
