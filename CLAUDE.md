@@ -19,3 +19,7 @@ Static re-frame/shadow-cljs SPA, no backend. See README for modes and deploy.
 - Attempt records are the stats source of truth; keep their shape (`:chord :inv :root :answer :answer-inv :correct :ms :mode :via :t`) backward compatible, since users have history stored.
 - `resources/public/sw.js` lists the app-shell files and samples explicitly. Update it when adding static files, and bump `VERSION` when the cached set changes.
 - Timers in training carry a `:round` token; any new delayed event must check it, so stale timeouts are ignored after stop/next.
+
+## Roadmap
+
+`TODO.md` holds the feature roadmap. The direction: move from recognizing chords on their own toward arranging by ear (imagining harmony, progressions, reharmonization, voicings). Prefer features that serve that goal.
