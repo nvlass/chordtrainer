@@ -5,6 +5,7 @@
             [chordtrainer.events]
             [chordtrainer.subs]
             [chordtrainer.views :as views]
+            [chordtrainer.guard :as guard]
             [chordtrainer.audio :as audio]
             [chordtrainer.storage :as storage]))
 
@@ -14,7 +15,7 @@
   (rf/clear-subscription-cache!)
   (when-not @root
     (reset! root (rdc/create-root (js/document.getElementById "app"))))
-  (rdc/render @root [views/app]))
+  (rdc/render @root [guard/guard [views/app]]))
 
 (defn- on-key [e]
   (let [tag (some-> (.-target e) .-tagName str/lower-case)]
