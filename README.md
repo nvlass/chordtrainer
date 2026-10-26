@@ -56,3 +56,7 @@ The service worker caches the app and samples on first visit (about 1 MB total),
 - **iOS**: Web MIDI isn't supported in Safari. Audio uses the `playback` audio session where available, so it should play with the silent switch on.
 - **Stats** live per browser. Use Stats → Export / Import to merge them between devices.
 - **Piano samples**: FluidR3_GM acoustic grand (via [gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts), CC BY 3.0), one sample every minor third, pitch-shifted in between.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The piano samples are CC BY 3.0 (see above).
