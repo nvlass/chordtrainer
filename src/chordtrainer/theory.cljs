@@ -18,13 +18,9 @@
     ("6" "bb7" "b7" "7") 3
     nil))
 
-(def groups
-  [[:triads "Triads"]
-   [:sevenths "7th chords"]
-   [:sus-add "Sus & add"]
-   [:extensions "Extensions"]
-   [:altered "Altered dominants"]])
+(def groups [:triads :sevenths :sus-add :extensions :altered])
 
+;; :name is the English name, the i18n dictionaries have :chord/<id>.
 ;; :degrees are the voiced tones; :optional tones may also be played on MIDI
 ;; (the 5th that is left out of a 13 chord, etc.).
 (defn- chord [id sym nm group degrees & [optional]]
@@ -74,16 +70,13 @@
 (def chord-by-id (into {} (map (juxt :id identity)) chords))
 
 (def presets
-  [["Everything" (map :id chords)]
-   ["All 7ths" [:maj7 :dom7 :m7 :m7b5 :dim7 :mmaj7 :maj7s5]]
-   ["maj7 / 7 / m7" [:maj7 :dom7 :m7]]
-   ["Dominant family" [:dom7 :dom7sus4 :dom9 :dom11 :dom13 :dom7b9 :dom7s9 :dom7s11 :dom7b13 :dom7alt :dom7s5 :dom7b5]]
-   ["Minor colors" [:min :m7 :m6 :mmaj7 :madd9 :m9 :m11 :m13 :m7b5]]
-   ["Major colors" [:maj :maj7 :maj6 :add9 :six9 :maj9 :maj7s11 :maj13]]
-   ["Sus & add" [:sus2 :sus4 :dom7sus4 :add9 :madd9 :maj6 :m6 :six9]]])
-
-(def inversion-names ["root position" "1st inversion" "2nd inversion" "3rd inversion"])
-(def inversion-short ["Root" "1st" "2nd" "3rd"])
+  [[:everything (map :id chords)]
+   [:sevenths [:maj7 :dom7 :m7 :m7b5 :dim7 :mmaj7 :maj7s5]]
+   [:basic [:maj7 :dom7 :m7]]
+   [:dominant [:dom7 :dom7sus4 :dom9 :dom11 :dom13 :dom7b9 :dom7s9 :dom7s11 :dom7b13 :dom7alt :dom7s5 :dom7b5]]
+   [:minor [:min :m7 :m6 :mmaj7 :madd9 :m9 :m11 :m13 :m7b5]]
+   [:major [:maj :maj7 :maj6 :add9 :six9 :maj9 :maj7s11 :maj13]]
+   [:sus-add [:sus2 :sus4 :dom7sus4 :add9 :madd9 :maj6 :m6 :six9]]])
 
 (defn semis [chord] (mapv degree-semis (:degrees chord)))
 
@@ -145,17 +138,6 @@
 (defn chord-name [chord root inv]
   (str (note-names root) (:sym chord)
        (when (pos? inv) (str "/" (note-names (bass-pc chord root inv))))))
-
-(defn inversion-label [chord inv]
-  (let [d (bass-degree chord inv)]
-    (if (zero? inv)
-      "root position"
-      (str (if (simple? chord) (inversion-names inv) "slash chord") " · " d " in bass"))))
-
-(defn formula [chord]
-  (let [opt (:optional chord)]
-    (str (str/join " " (:degrees chord))
-         (when (seq opt) (str "  (optional " (str/join " " opt) ")")))))
 
 (defn same-sound?
   "True when two [chord inv] answers at the same root give the same pitch classes and bass."

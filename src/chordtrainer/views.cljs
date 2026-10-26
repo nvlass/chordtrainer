@@ -2,7 +2,8 @@
   (:require [re-frame.core :as rf]
             [reagent.core :as r]
             [clojure.string :as str]
-            [chordtrainer.theory :as t]))
+            [chordtrainer.theory :as t]
+            [chordtrainer.i18n :refer [tr tr-msg]]))
 
 (defn <sub [q] @(rf/subscribe q))
 (defn >evt [e] (rf/dispatch e))
@@ -10,6 +11,21 @@
 (defn sym-label [c] (if (= "" (:sym c)) "maj" (:sym c)))
 
 (defn pct [x] (if x (str (Math/round (* 100 x)) "%") "–"))
+
+(defn chord-desc [c] (tr (keyword "chord" (name (:id c)))))
+
+(defn inv-short [i] (tr :inv/short i))
+
+(defn inversion-label [chord inv]
+  (if (zero? inv)
+    (tr :inv/long 0)
+    (str (if (t/simple? chord) (tr :inv/long inv) (tr :inv/slash)) " · "
+         (tr :inv/in-bass (t/bass-degree chord inv)))))
+
+(defn formula [chord]
+  (let [opt (:optional chord)]
+    (str (str/join " " (:degrees chord))
+         (when (seq opt) (str "  (" (tr :inv/optional) " " (str/join " " opt) ")")))))
 
 (defn secs [ms] (if ms (str (.toFixed (/ ms 1000) 1) "s") "–"))
 
@@ -49,7 +65,7 @@
         pl (set played)
         cls (fn [m] (cond (= m bass) "k bass" (on m) "k on" (pl m) "k played" :else "k"))]
     [:svg.piano {:viewBox (str "0 0 " (* w (count whites)) " " (inc h)) :role "img"
-                 :aria-label (str "Notes: " (str/join " " (map t/note-name notes)))}
+                 :aria-label (tr :ui/notes (str/join " " (map t/note-name notes)))}
      (for [m whites :let [x (* w (wi m))]]
        ^{:key m}
        [:g {:class (cls m)}
@@ -67,8 +83,8 @@
   (let [c (t/chord-by-id chord)]
     [:div.card.reveal
      [:div.chord-name (t/chord-name c root inv)]
-     [:div.chord-sub (:name c) " · " (t/inversion-label c inv)]
-     [:div.formula (t/formula c)]
+     [:div.chord-sub (chord-desc c) " · " (inversion-label c inv)]
+     [:div.formula (formula c)]
      [piano {:notes notes :bass (first notes) :played (:last (<sub [:midi]))}]
      extra]))
 
@@ -80,21 +96,21 @@
       [:span.badge {:class (when (seq inputs) "live")
                     :title (str/join ", " inputs)}
        (case state
-         :ready (if (seq inputs) (str "MIDI · " (count inputs) (when (seq held) " ●")) "MIDI · no device")
-         :unsupported "MIDI unsupported"
-         :denied "MIDI denied"
-         "MIDI…")])))
+         :ready (if (seq inputs) (tr :midi/ready (count inputs) (seq held)) (tr :midi/no-device))
+         :unsupported (tr :midi/unsupported)
+         :denied (tr :midi/denied)
+         (tr :midi/connecting))])))
 
 (defn error-banner []
-  (when-let [e (<sub [:error])] [:div.banner.warn e]))
+  (when-let [e (<sub [:error])] [:div.banner.warn (tr-msg e)]))
 
 (defn root-pill []
   (let [{:keys [root]} (<sub [:current])]
     (when root
       [:div.root-row
-       [:span.pill "Root " [:b (t/note-names root)]]
-       [:button.ghost {:on-click #(>evt [:hear-root])} "Hear root"]
-       [:button.ghost {:on-click #(>evt [:replay])} "▶ Replay"]])))
+       [:span.pill (tr :ui/root) [:b (t/note-names root)]]
+       [:button.ghost {:on-click #(>evt [:hear-root])} (tr :ui/hear-root)]
+       [:button.ghost {:on-click #(>evt [:replay])} (tr :ui/replay)]])))
 
 ;; ---------------------------------------------------------------- puzzle
 
@@ -109,19 +125,19 @@
           ^{:key i}
           [:button.inv {:class (when (= i (:inv pending)) "on")
                         :on-click #(>evt [:puzzle/pick-inv i])}
-           (t/inversion-short i)])])
-     (for [[label cs] groups]
-       ^{:key label}
+           (inv-short i)])])
+     (for [[g cs] groups]
+       ^{:key g}
        [:div.group
-        [:div.group-label label]
+        [:div.group-label (tr (keyword "group" (name g)))]
         [:div.grid
          (for [c cs]
            ^{:key (:id c)}
            [:button.q {:class (when (= (:id c) (:chord pending)) "on")
                        :on-click #(>evt [:puzzle/pick-chord (:id c)])}
-            [:b (sym-label c)] [:small (:name c)]])]])
+            [:b (sym-label c)] [:small (chord-desc c)]])]])
      (when (> (count choices) 1)
-       [:p.hint "Pick an inversion and a chord, in either order."])]))
+       [:p.hint (tr :ui/pick-both)])]))
 
 (defn result []
   (let [{:keys [correct answer answer-inv ms via]} (<sub [:answer])
@@ -129,24 +145,23 @@
         a (t/chord-by-id answer)]
     [:div
      [:div.banner {:class (if correct "good" "bad")}
-      (if correct "✓ Correct" "✗ Not quite")
+      (if correct (tr :ui/correct) (tr :ui/not-quite))
       (when-not correct
-        [:span " — you said " [:b (str (sym-label a)
-                                        (when (> (count (<sub [:inv-choices])) 1)
-                                          (str " · " (t/inversion-short answer-inv))))]])
-      [:span.meta (secs ms) (when (= via :midi) " · via MIDI")]]
+        (tr :ui/you-said (str (sym-label a)
+                              (when (> (count (<sub [:inv-choices])) 1)
+                                (str " · " (inv-short answer-inv))))))
+      [:span.meta (secs ms) (when (= via :midi) (tr :ui/via-midi))]]
      (when-not correct
        (when-let [{r :root nm :name} (t/same-notes-elsewhere (t/chord-by-id (:chord cur)) (:root cur)
                                                              (:inv cur) a)]
          [:div.banner.insight
-          "Same notes as " [:b nm] " — you heard " [:b (t/note-names r)] " as the root. "
-          "The root here is " [:b (t/note-names (:root cur))] "."]))
+          (tr :ui/same-notes nm (t/note-names r) (t/note-names (:root cur)))]))
      [chord-card cur
       [:div.actions
-       [:button {:on-click #(>evt [:replay])} "▶ Play it"]
-       (when-not correct [:button {:on-click #(>evt [:puzzle/play-answer])} "Play yours"])
-       (when-not correct [:button {:on-click #(>evt [:puzzle/compare])} "Compare (C)"])
-       [:button.primary {:on-click #(>evt [:puzzle/next])} "Next →"]]]]))
+       [:button {:on-click #(>evt [:replay])} (tr :ui/play-it)]
+       (when-not correct [:button {:on-click #(>evt [:puzzle/play-answer])} (tr :ui/play-yours)])
+       (when-not correct [:button {:on-click #(>evt [:puzzle/compare])} (tr :ui/compare)])
+       [:button.primary {:on-click #(>evt [:puzzle/next])} (tr :ui/next)]]]]))
 
 (defn puzzle-view []
   (let [phase (<sub [:phase])
@@ -155,16 +170,16 @@
      [error-banner]
      (if (= :idle phase)
        [:div.start
-        [:h2 "Puzzle"]
-        [:p "A chord plays — name its quality" (when (> (count (<sub [:inv-choices])) 1) " and inversion") "."]
-        [:button.primary.big {:on-click #(>evt [:puzzle/next])} "Start"]
-        [:p.hint "Keys: Enter next · Space replay · R root · C compare"]]
+        [:h2 (tr :ui/puzzle-title)]
+        [:p (tr :ui/puzzle-intro (> (count (<sub [:inv-choices])) 1))]
+        [:button.primary.big {:on-click #(>evt [:puzzle/next])} (tr :ui/start)]
+        [:p.hint (tr :ui/puzzle-keys)]]
        [:div
         [:div.topline
          [root-pill]
          [:span.score (when (pos? n) (str (:correct (<sub [:session])) "/" n " · " (pct acc)
                                           (when (> streak 1) (str " · 🔥" streak))))]]
-        (when-let [m (<sub [:midi-msg])] [:div.banner.warn m])
+        (when-let [m (<sub [:midi-msg])] [:div.banner.warn (tr-msg m)])
         (case phase
           :question [answer-grid]
           :answered [result]
@@ -183,38 +198,37 @@
      [error-banner]
      (if (= :idle phase)
        [:div.start
-        [:h2 "Training"]
-        [:p "Chords play one after another. Name each one in your head before it's revealed ("
-         (:pause s) "s pause)."]
-        [:button.primary.big {:on-click #(>evt [:training/start])} "Start"]
-        [:p.hint "Keys: Enter reveal / next · Space replay · R root"]]
+        [:h2 (tr :ui/training-title)]
+        [:p (tr :ui/training-intro (:pause s))]
+        [:button.primary.big {:on-click #(>evt [:training/start])} (tr :ui/start)]
+        [:p.hint (tr :ui/training-keys)]]
        [:div
         [:div.topline [root-pill]]
         (if (= :listening phase)
           [:div.card.mystery
            [:div.chord-name "?"]
-           [:div.chord-sub "Listen. What is it?"]
+           [:div.chord-sub (tr :ui/listen)]
            ^{:key round} [:div.countdown [:div {:style {:animation-duration (str ms "ms")}}]]
            [:div.actions
-            [:button {:on-click #(>evt [:training/reveal round])} "Reveal now"]]]
+            [:button {:on-click #(>evt [:training/reveal round])} (tr :ui/reveal)]]]
           [chord-card cur
            [:div.actions
             [:button.good {:disabled (some? graded) :class (when (true? graded) "on")
-                           :on-click #(>evt [:training/grade true])} "✓ Heard it"]
+                           :on-click #(>evt [:training/grade true])} (tr :ui/heard-it)]
             [:button.bad {:disabled (some? graded) :class (when (false? graded) "on")
-                          :on-click #(>evt [:training/grade false])} "✗ Missed it"]
-            [:button.primary {:on-click #(>evt [:training/next])} "Next →"]]])
+                          :on-click #(>evt [:training/grade false])} (tr :ui/missed-it)]
+            [:button.primary {:on-click #(>evt [:training/next])} (tr :ui/next)]]])
         [:div.actions.center
          (if running
-           [:button.ghost {:on-click #(>evt [:training/stop])} "■ Stop"]
-           [:button.ghost {:on-click #(>evt [:training/start])} "Resume"])
-         (when (and running (:auto-advance s)) [:span.hint "auto-advancing"])]])]))
+           [:button.ghost {:on-click #(>evt [:training/stop])} (tr :ui/stop)]
+           [:button.ghost {:on-click #(>evt [:training/start])} (tr :ui/resume)])
+         (when (and running (:auto-advance s)) [:span.hint (tr :ui/auto-advancing)])]])]))
 
 ;; ---------------------------------------------------------------- stats
 
 (defn chord-label [id inv]
   (let [c (t/chord-by-id id)]
-    (str (sym-label c) (when inv (str " · " (t/inversion-short inv))))))
+    (str (sym-label c) (when inv (str " · " (inv-short inv))))))
 
 (defn meter [x]
   [:span.meter [:span {:style {:width (pct (or x 0))}}]])
@@ -224,7 +238,7 @@
     [:div.card
      [:h3 title]
      [:table.stats
-      [:thead [:tr [:th] [:th "n"] [:th "accuracy"] [:th.num "last 20"] [:th.num "avg"]]]
+      [:thead [:tr [:th] [:th "n"] [:th (tr :ui/th-accuracy)] [:th.num (tr :ui/th-last20)] [:th.num (tr :ui/th-avg)]]]
       [:tbody
        (for [{:keys [key n acc recent-acc avg-ms]} rows]
          ^{:key (str key)}
@@ -239,63 +253,62 @@
   (let [days (<sub [:stats/daily])
         maxn (apply max 1 (map :n days))]
     [:div.card
-     [:h3 "Last 14 days"]
+     [:h3 (tr :ui/last-14)]
      [:div.daily
       (for [{:keys [day n acc]} days
             :let [d (js/Date. day)
                   label (str (.getDate d) "/" (inc (.getMonth d)))]]
         ^{:key day}
-        [:div.day {:title (str label ": " n " answers" (when acc (str ", " (pct acc) " correct")))}
+        [:div.day {:title (tr :ui/day-title label n (when acc (pct acc)))}
          [:div.bar-wrap
           (when (pos? n)
             [:div.bar {:style {:height (pct acc) :opacity (+ 0.35 (* 0.65 (/ n maxn)))}}])]
          [:small label]])]
-     [:p.hint "Bar height = accuracy, opacity = volume. Hover for details."]]))
+     [:p.hint (tr :ui/daily-hint)]]))
 
 (defn reset-button []
   (let [armed (r/atom false)]
     (fn []
       (if @armed
         [:span
-         [:button.bad {:on-click #(do (reset! armed false) (>evt [:stats/reset]))} "Really erase all stats"]
-         [:button.ghost {:on-click #(reset! armed false)} "Cancel"]]
-        [:button.ghost {:on-click #(reset! armed true)} "Reset stats…"]))))
+         [:button.bad {:on-click #(do (reset! armed false) (>evt [:stats/reset]))} (tr :ui/really-erase)]
+         [:button.ghost {:on-click #(reset! armed false)} (tr :ui/cancel)]]
+        [:button.ghost {:on-click #(reset! armed true)} (tr :ui/reset-stats)]))))
 
 (defn stats-view []
   (let [{:keys [n acc avg-ms]} (<sub [:stats/overall])
         conf (<sub [:stats/confusions])]
     [:section
      [:div.stats-filter
-      [seg [[:all "All"] [:recognition "Hearing"] [:imagine "Imagining"]]
+      [seg [[:all (tr :ui/filter-all)] [:recognition (tr :ui/filter-recognition)] [:imagine (tr :ui/filter-imagine)]]
        (<sub [:stats-filter]) #(>evt [:stats/filter %])]]
      [:div.tiles
-      [:div.tile [:small "Answers"] [:b n]]
-      [:div.tile [:small "Accuracy"] [:b (pct acc)]]
-      [:div.tile [:small "Avg time"] [:b (secs avg-ms)]]]
+      [:div.tile [:small (tr :ui/answers)] [:b n]]
+      [:div.tile [:small (tr :ui/accuracy)] [:b (pct acc)]]
+      [:div.tile [:small (tr :ui/avg-time)] [:b (secs avg-ms)]]]
      (if (zero? n)
-       [:div.card [:p "No stats yet. Answer some puzzles (or self-grade in training / imagine) and your weak spots will show up here. "
-                   "With “adaptive” on, the trainer plays your weak chords more often."]]
+       [:div.card [:p (tr :ui/no-stats)]]
        [:<>
         [daily-chart]
-        [stat-table "Chords — weakest first" (<sub [:stats/by-chord]) #(chord-label % nil)]
-        [stat-table "Weakest chord + inversion" (<sub [:stats/by-pair]) (fn [[id inv]] (chord-label id inv))]
+        [stat-table (tr :ui/by-chord) (<sub [:stats/by-chord]) #(chord-label % nil)]
+        [stat-table (tr :ui/by-pair) (<sub [:stats/by-pair]) (fn [[id inv]] (chord-label id inv))]
         (when (seq conf)
           [:div.card
-           [:h3 "Confusions"]
+           [:h3 (tr :ui/confusions)]
            [:ul.conf
             (for [{:keys [chord inv answer answer-inv n]} conf]
               ^{:key (str chord inv answer answer-inv)}
-              [:li [:b (chord-label chord inv)] " heard as " [:b (chord-label answer answer-inv)]
+              [:li [:b (chord-label chord inv)] (tr :ui/heard-as) [:b (chord-label answer answer-inv)]
                [:span.num (str n "×")]])]])
-        [stat-table "Inversions" (<sub [:stats/by-inv]) #(t/inversion-short %)]
-        [stat-table "Roots" (<sub [:stats/by-root]) #(t/note-names %)]])
+        [stat-table (tr :ui/by-inv) (<sub [:stats/by-inv]) inv-short]
+        [stat-table (tr :ui/by-root) (<sub [:stats/by-root]) #(t/note-names %)]])
      [:div.card
-      [:h3 "Data"]
-      [:p.hint "Stats live in this browser. Export from one device and import on another to merge them."]
-      (when-let [f (<sub [:flash])] [:div.banner f])
+      [:h3 (tr :ui/data)]
+      [:p.hint (tr :ui/data-hint)]
+      (when-let [f (<sub [:flash])] [:div.banner (tr-msg f)])
       [:div.actions
-       [:button {:on-click #(>evt [:stats/export])} "Export"]
-       [:label.button "Import"
+       [:button {:on-click #(>evt [:stats/export])} (tr :ui/export)]
+       [:label.button (tr :ui/import)
         [:input {:type "file" :accept ".edn,text/plain" :hidden true
                  :on-change (fn [e]
                               (when-let [file (aget (.. e -target -files) 0)]
@@ -308,27 +321,27 @@
 (defn chord-settings []
   (let [enabled (:enabled (<sub [:settings]))]
     [:div.card
-     [:h3 "Chords " [:small (count enabled) " enabled"]]
+     [:h3 (tr :ui/chords) [:small (tr :ui/enabled (count enabled))]]
      [:div.presets
-      (for [[label ids] t/presets]
-        ^{:key label}
+      (for [[p ids] t/presets]
+        ^{:key p}
         [:button.ghost {:class (when (= (set ids) enabled) "on")
-                        :on-click #(>evt [:settings/set-enabled ids])} label])]
-     (for [[g label] t/groups
+                        :on-click #(>evt [:settings/set-enabled ids])} (tr (keyword "preset" (name p)))])]
+     (for [g t/groups
            :let [cs (filter #(= g (:group %)) t/chords)
                  ids (set (map :id cs))
                  all? (every? enabled ids)]]
        ^{:key g}
        [:div.group
-        [:div.group-label label
+        [:div.group-label (tr (keyword "group" (name g)))
          [:button.link {:on-click #(>evt [:settings/set-enabled
                                           (if all? (remove ids enabled) (into enabled ids))])}
-          (if all? "none" "all")]]
+          (if all? (tr :ui/none) (tr :ui/all))]]
         [:div.chips
          (for [c cs]
            ^{:key (:id c)}
            [:button.chip {:class (when (enabled (:id c)) "on")
-                          :title (str (:name c) ": " (t/formula c))
+                          :title (str (chord-desc c) ": " (formula c))
                           :on-click #(>evt [:settings/toggle-chord (:id c)])}
             (sym-label c)])]])]))
 
@@ -338,8 +351,8 @@
     [:section
      [chord-settings]
      [:div.card
-      [:h3 "Roots"]
-      [seg [[:fixed "Fixed"] [:naturals "Random, no accidentals"] [:all "Random, all 12"]]
+      [:h3 (tr :ui/roots)]
+      [seg [[:fixed (tr :ui/root-fixed)] [:naturals (tr :ui/root-naturals)] [:all (tr :ui/root-all)]]
        (:root-mode s) (setter :root-mode)]
       (when (= :fixed (:root-mode s))
         [:div.chips
@@ -349,52 +362,45 @@
                           :on-click #(>evt [:settings/set :fixed-root pc])}
             (t/note-names pc)])])]
      [:div.card
-      [:h3 "Inversions"]
+      [:h3 (tr :ui/inversions)]
       [:div.chips
        (for [i (range 4)]
          ^{:key i}
          [:button.chip {:class (when ((:inversions s) i) "on")
                         :on-click #(>evt [:settings/toggle-inversion i])}
-          (t/inversion-short i)])]
-      [:p.hint "1st = 3rd (or sus tone) in bass, 2nd = 5th, 3rd = 7th/6th. "
-       "Chords with 9ths and up are played as slash chords with that tone in the bass; "
-       "a chord is skipped for an inversion it lacks (e.g. 13 has no 5th)."]]
+          (inv-short i)])]
+      [:p.hint (tr :ui/inv-hint)]]
      [:div.card
-      [:h3 "Sound"]
-      [:div.field [:span "Voicing"]
-       [seg [[:close "Close"] [:spread "Spread (bass + RH)"]] (:voicing s) (setter :voicing)]]
-      [:div.field [:span "Playback"]
-       [seg [[:block "Block"] [:arp "Arpeggio"] [:arp-block "Arp → block"]] (:playback s) (setter :playback)]]
+      [:h3 (tr :ui/sound)]
+      [:div.field [:span (tr :ui/voicing)]
+       [seg [[:close (tr :ui/close)] [:spread (tr :ui/spread)]] (:voicing s) (setter :voicing)]]
+      [:div.field [:span (tr :ui/playback-style)]
+       [seg [[:block (tr :ui/block)] [:arp (tr :ui/arp)] [:arp-block (tr :ui/arp-block)]] (:playback s) (setter :playback)]]
       (when (not= :block (:playback s))
-        [slider "Arpeggio speed" (:tempo s) 60 400 10 " bpm" (setter :tempo)])
-      [toggle "Play root before each chord" (:root-ref s) (setter :root-ref)
-       "a reference so you can hear the chord against its root"]]
+        [slider (tr :ui/arp-speed) (:tempo s) 60 400 10 " bpm" (setter :tempo)])
+      [toggle (tr :ui/root-ref) (:root-ref s) (setter :root-ref) (tr :ui/root-ref-hint)]]
      [:div.card
-      [:h3 "Training"]
-      [slider "Thinking pause" (:pause s) 0 10 0.5 "s" (setter :pause)]
-      [slider "Show answer for" (:hold s) 1 15 0.5 "s" (setter :hold)]
-      [toggle "Replay chord on reveal" (:replay-on-reveal s) (setter :replay-on-reveal)]
-      [toggle "Auto-advance" (:auto-advance s) (setter :auto-advance)]]
+      [:h3 (tr :ui/training)]
+      [slider (tr :ui/pause) (:pause s) 0 10 0.5 "s" (setter :pause)]
+      [slider (tr :ui/hold) (:hold s) 1 15 0.5 "s" (setter :hold)]
+      [toggle (tr :ui/replay-on-reveal) (:replay-on-reveal s) (setter :replay-on-reveal)]
+      [toggle (tr :ui/auto-advance) (:auto-advance s) (setter :auto-advance)]]
      [:div.card
-      [:h3 "Selection"]
-      [toggle "Adaptive — drill weak chords more" (:adaptive s) (setter :adaptive)
-       "weights chords by your recent error rate (hearing and imagining are tracked separately)"]
-      [toggle "Imagine: play the root when showing a chord" (:imagine-root s) (setter :imagine-root)
-       "an anchor pitch to imagine the chord from"]]
+      [:h3 (tr :ui/selection)]
+      [toggle (tr :ui/adaptive) (:adaptive s) (setter :adaptive) (tr :ui/adaptive-hint)]
+      [toggle (tr :ui/imagine-root) (:imagine-root s) (setter :imagine-root) (tr :ui/imagine-root-hint)]]
      [:div.card
-      [:h3 "MIDI keyboard"]
-      [toggle "Use MIDI input" (:midi s) (setter :midi)
-       "answer puzzles by playing the chord (Chrome/Edge/Firefox; not iOS Safari)"]
+      [:h3 (tr :ui/midi-title)]
+      [toggle (tr :ui/use-midi) (:midi s) (setter :midi) (tr :ui/use-midi-hint)]
       (when (:midi s)
         [:<>
          [:p.hint (let [{:keys [state inputs]} (<sub [:midi])]
                     (case state
-                      :ready (if (seq inputs) (str "Connected: " (str/join ", " inputs)) "No MIDI devices found — plug one in.")
-                      :unsupported "This browser doesn't support Web MIDI."
-                      :denied "MIDI access was denied."
-                      "Connecting…"))]
-         [toggle "Sound notes I play" (:midi-echo s) (setter :midi-echo)
-          "for silent controllers"]])]]))
+                      :ready (if (seq inputs) (tr :midi/connected (str/join ", " inputs)) (tr :midi/none-long))
+                      :unsupported (tr :midi/unsupported-long)
+                      :denied (tr :midi/denied-long)
+                      (tr :midi/connecting-long)))]
+         [toggle (tr :ui/midi-echo) (:midi-echo s) (setter :midi-echo) (tr :ui/midi-echo-hint)]])]]))
 
 ;; ---------------------------------------------------------------- imagine
 
@@ -408,33 +414,32 @@
      (if (#{:imagine :imagine-heard} phase)
        [:div
         [:div.topline [:div.root-row
-                       [:span.pill "Root " [:b (t/note-names root)]]
-                       [:button.ghost {:on-click #(>evt [:hear-root])} "Hear root"]]]
+                       [:span.pill (tr :ui/root) [:b (t/note-names root)]]
+                       [:button.ghost {:on-click #(>evt [:hear-root])} (tr :ui/hear-root)]]]
         (if (= :imagine phase)
           [:div.card.reveal
            [:div.chord-name (t/chord-name c root inv)]
-           [:div.chord-sub (:name c) " · " (t/inversion-label c inv)]
-           [:div.formula (t/formula c)]
-           [:p.imagine-prompt "Hear it in your head — bass first, then the top note, then the colour in between. "
-            "Sing or hum it if you can."]
-           [:div.actions [:button.primary {:on-click #(>evt [:imagine/hear])} "Hear it (Enter)"]]]
+           [:div.chord-sub (chord-desc c) " · " (inversion-label c inv)]
+           [:div.formula (formula c)]
+           [:p.imagine-prompt (tr :ui/imagine-prompt)]
+           [:div.actions [:button.primary {:on-click #(>evt [:imagine/hear])} (tr :ui/hear-it)]]]
           [chord-card cur
            [:div.actions
-            [:button {:on-click #(>evt [:imagine/hear])} "▶ Again"]
+            [:button {:on-click #(>evt [:imagine/hear])} (tr :ui/again)]
             [:button.good {:disabled (some? graded) :class (when (true? graded) "on")
-                           :on-click #(>evt [:imagine/grade true])} "✓ Matched (Y)"]
+                           :on-click #(>evt [:imagine/grade true])} (tr :ui/matched)]
             [:button.bad {:disabled (some? graded) :class (when (false? graded) "on")
-                          :on-click #(>evt [:imagine/grade false])} "✗ Different (N)"]
-            [:button.primary {:on-click #(>evt [:imagine/next])} "Next →"]]])]
+                          :on-click #(>evt [:imagine/grade false])} (tr :ui/different)]
+            [:button.primary {:on-click #(>evt [:imagine/next])} (tr :ui/next)]]])]
        [:div.start
-        [:h2 "Imagine"]
-        [:p "The reverse direction: you see a chord symbol, imagine how it sounds, then check."]
-        [:button.primary.big {:on-click #(>evt [:imagine/next])} "Start"]
-        [:p.hint "Keys: Enter hear / next · Space again · R root · Y / N grade"]])]))
+        [:h2 (tr :ui/imagine-title)]
+        [:p (tr :ui/imagine-intro)]
+        [:button.primary.big {:on-click #(>evt [:imagine/next])} (tr :ui/start)]
+        [:p.hint (tr :ui/imagine-keys)]])]))
 
 ;; ---------------------------------------------------------------- sketchpad
 
-(def comp-styles [[:whole "Whole"] [:charleston "Charleston"] [:four "Four"] [:arp "Arpeggio"]])
+(def comp-styles [:whole :charleston :four :arp])
 
 (defn sketch-file []
   (let [sk (<sub [:sketch])
@@ -442,17 +447,17 @@
         exists? (some #(= (:name sk) (:name %)) saved)]
     [:div.card
      [:div.file-row
-      [:input.name {:value (:name sk) :aria-label "Sketch name"
+      [:input.name {:value (:name sk) :aria-label (tr :ui/sketch-name)
                     :on-change #(>evt [:sketch/set :name (.. % -target -value)])}]
-      [:button {:on-click #(>evt [:sketch/save])} "Save"]
-      [:button.ghost {:on-click #(>evt [:sketch/new])} "New"]
-      (when exists? [:button.ghost {:on-click #(>evt [:sketch/delete])} "Delete"])]
+      [:button {:on-click #(>evt [:sketch/save])} (tr :ui/save)]
+      [:button.ghost {:on-click #(>evt [:sketch/new])} (tr :ui/new)]
+      (when exists? [:button.ghost {:on-click #(>evt [:sketch/delete])} (tr :ui/delete)])]
      (when (seq saved)
        [:div.chips
         (for [{nm :name} saved]
           ^{:key nm}
           [:button.chip {:class (when (= nm (:name sk)) "on") :on-click #(>evt [:sketch/load nm])} nm])])
-     (when-let [f (<sub [:flash])] [:p.hint f])]))
+     (when-let [f (<sub [:flash])] [:p.hint (tr-msg f)])]))
 
 (defn sketch-bars []
   (let [slots (<sub [:sketch/slots])
@@ -466,7 +471,7 @@
           (for [{:keys [i token error]} items]
             ^{:key i}
             [:button.slot {:class [(when error "err") (when (= i pos) "now") (when (= i sel) "sel")]
-                           :title (when error "Unknown chord symbol")
+                           :title (when error (tr :ui/unknown-symbol))
                            :on-click #(>evt [:sketch/select i])}
              token])])])))
 
@@ -478,8 +483,8 @@
       (let [c (t/chord-by-id chord)]
         [:div.card
          [:div.chord-name token]
-         [:div.chord-sub (:name c)]
-         [:div.formula (t/formula c)]
+         [:div.chord-sub (chord-desc c)]
+         [:div.formula (formula c)]
          [piano {:notes (vec (cons bass-note upper)) :bass bass-note}]]))))
 
 (defn sketch-view []
@@ -494,48 +499,49 @@
       [:textarea.prog {:value (:text sk) :rows 4 :spell-check false :auto-capitalize "off"
                        :auto-correct "off" :placeholder "Dm9 | G13 | Cmaj9 | A7alt"
                        :on-change #(>evt [:sketch/set :text (.. % -target -value)])}]
-      [:p.hint "Bars with | or new lines, several chords per bar with spaces, % repeats a bar. "
-       "Symbols like Cmaj7 CΔ7 Dm9 D-9 F#ø Bb13/D G7alt C6/9."]
+      [:p.hint (tr :ui/sketch-hint)]
       (when (seq errors)
-        [:p.hint.err-text "Unknown: " (str/join ", " (distinct (map :token errors)))])
+        [:p.hint.err-text (tr :ui/unknown) (str/join ", " (distinct (map :token errors)))])
       [sketch-bars]
       [:div.actions
        (if playing
-         [:button.primary {:on-click #(>evt [:sketch/stop])} "■ Stop"]
-         [:button.primary {:on-click #(>evt [:sketch/play])} "▶ Play"])
+         [:button.primary {:on-click #(>evt [:sketch/stop])} (tr :ui/stop)]
+         [:button.primary {:on-click #(>evt [:sketch/play])} (tr :ui/play)])
        [:button.ghost {:on-click #(>evt [:sketch/transpose -1])} "♭ −1"]
        [:button.ghost {:on-click #(>evt [:sketch/transpose 1])} "♯ +1"]]]
      [sketch-selected]
      [:div.card
-      [:h3 "Playback"]
-      [:div.field [:span "Comping"] [seg comp-styles (:comp sk) (setter :comp)]]
-      [slider "Tempo" (:tempo sk) 40 220 2 " bpm" (setter :tempo)]
-      [:div.field [:span "Beats per bar"] [seg [[3 "3"] [4 "4"]] (:beats sk) (setter :beats)]]
-      [toggle "Bass in 2 (root, then 5th)" (:bass sk) (setter :bass)]
-      [toggle "Voice leading" (:voice-lead sk) (setter :voice-lead)
-       "move each chord to the nearest position instead of jumping"]
-      [toggle "Loop" (:loop sk) (setter :loop)]
-      [:p.hint "Close / spread voicing comes from Settings → Sound."]]]))
+      [:h3 (tr :ui/playback)]
+      [:div.field [:span (tr :ui/comping)]
+       [seg (for [c comp-styles] [c (tr (keyword "ui" (str "comp-" (name c))))]) (:comp sk) (setter :comp)]]
+      [slider (tr :ui/tempo) (:tempo sk) 40 220 2 " bpm" (setter :tempo)]
+      [:div.field [:span (tr :ui/beats)] [seg [[3 "3"] [4 "4"]] (:beats sk) (setter :beats)]]
+      [toggle (tr :ui/bass2) (:bass sk) (setter :bass)]
+      [toggle (tr :ui/voice-lead) (:voice-lead sk) (setter :voice-lead) (tr :ui/voice-lead-hint)]
+      [toggle (tr :ui/loop) (:loop sk) (setter :loop)]
+      [:p.hint (tr :ui/voicing-from)]]]))
 
 ;; ---------------------------------------------------------------- app
 
-(def tabs [[:training "Train"] [:puzzle "Puzzle"] [:imagine "Imagine"] [:sketch "Sketch"]
-           [:stats "Stats"] [:settings "⚙"]])
+(def tabs [:training :puzzle :imagine :sketch :stats :settings])
 
 (defn app []
   (let [view (<sub [:view])
         samples (<sub [:samples])]
     [:div.app
      [:header
-      [:h1 "Chord trainer"]
-      [midi-badge]]
+      [:h1 (tr :ui/title)]
+      [:div.header-end
+       [midi-badge]
+       [:div.lang
+        [seg [[:en "EN"] [:el "ΕΛ"]] (:lang (<sub [:settings])) #(>evt [:settings/set :lang %])]]]]
      [:nav
-      (for [[v label] tabs]
+      (for [v tabs]
         ^{:key v}
         [:button {:class (when (= v view) "on") :aria-label (name v)
-                  :on-click #(>evt [:set-view v])} label])]
-     (when (nil? samples) [:div.banner "Loading piano samples…"])
-     (when (zero? samples) [:div.banner.warn "Couldn't load piano samples."])
+                  :on-click #(>evt [:set-view v])} (tr (keyword "nav" (name v)))])]
+     (when (nil? samples) [:div.banner (tr :ui/loading-samples)])
+     (when (zero? samples) [:div.banner.warn (tr :ui/samples-failed)])
      [:main
       (case view
         :training [training-view]

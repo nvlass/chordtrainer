@@ -10,6 +10,8 @@
            :sketch :sketches :sketch-play :sketch-sel :stats-filter]]
   (rf/reg-sub k (fn [db _] (get db k))))
 
+(rf/reg-sub :loc :<- [:settings] (fn [s _] {:lang (:lang s)}))
+
 (rf/reg-sub :pool :<- [:settings] (fn [s _] (ev/pool s)))
 
 (rf/reg-sub :inv-choices :<- [:settings] (fn [s _] (ev/inv-choices s)))
@@ -18,10 +20,10 @@
   :<- [:pool]
   (fn [pool _]
     (let [ids (set (map (comp :id first) pool))]
-      (for [[g label] t/groups
+      (for [g t/groups
             :let [cs (filter #(and (= g (:group %)) (ids (:id %))) t/chords)]
             :when (seq cs)]
-        [label cs]))))
+        [g cs]))))
 
 (rf/reg-sub :session
   :<- [:attempts] :<- [:session-start]

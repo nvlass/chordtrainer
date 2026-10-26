@@ -7,10 +7,12 @@
             [chordtrainer.stats :as stats]
             [chordtrainer.sketch :as sketch]
             [chordtrainer.storage :as storage]
-            [chordtrainer.midi :as midi]))
+            [chordtrainer.midi :as midi]
+            [chordtrainer.i18n :as i18n]))
 
 (def default-settings
-  {:enabled #{:maj7 :dom7 :m7 :m7b5 :dim7 :mmaj7 :maj7s5}
+  {:lang (i18n/browser-lang)
+   :enabled #{:maj7 :dom7 :m7 :m7b5 :dim7 :mmaj7 :maj7s5}
    :root-mode :all
    :fixed-root 0
    :inversions #{0}
@@ -28,7 +30,7 @@
    :imagine-root true})
 
 (def default-sketch
-  {:name "Example"
+  {:name (i18n/translate (i18n/browser-lang) :ui/example {})
    :text "Em9 | Em9/D | Cmaj7#11 | B7alt\nAm9 | D13 | Gmaj7 | F#m7b5 B7b9"
    :tempo 96
    :beats 4
@@ -66,6 +68,7 @@
     (doseq [{:keys [ms event]} (if (map? x) [x] x)]
       (js/setTimeout #(rf/dispatch event) ms))))
 (rf/reg-fx :save (fn [kvs] (doseq [[k v] kvs] (storage/save! k v))))
+(rf/reg-fx :html-lang (fn [lang] (set! (.. js/document -documentElement -lang) (name lang))))
 (rf/reg-fx :midi/connect (fn [on?] (if on? (midi/connect!) (midi/disconnect!))))
 
 (rf/reg-fx :download
@@ -143,7 +146,8 @@
     (let [s (merge default-settings settings)]
       (cond-> {:db (assoc db :settings s :attempts (vec attempts) :loaded? true
                           :sketch (merge default-sketch sketch)
-                          :sketches (vec sketches))}
+                          :sketches (vec sketches))
+               :html-lang (:lang s)}
         (:midi s) (assoc :midi/connect true)))))
 
 (rf/reg-event-db :audio/loaded
@@ -167,7 +171,8 @@
 (rf/reg-event-fx :settings/set
   (fn [{:keys [db]} [_ k v]]
     (cond-> (save-settings (assoc-in db [:settings k] v))
-      (= k :midi) (assoc :midi/connect v))))
+      (= k :midi) (assoc :midi/connect v)
+      (= k :lang) (assoc :html-lang v))))
 
 (rf/reg-event-fx :settings/toggle-chord
   (fn [{:keys [db]} [_ id]]
@@ -195,7 +200,7 @@
                     :current (assoc q :started (+ now (* 1000 (:length tl))))
                     :phase :question :answer nil :pending {} :midi-msg nil :error nil)
          :audio/play (:events tl)})
-      {:db (assoc db :error "No chords match your settings — enable some chords or inversions.")})))
+      {:db (assoc db :error [:msg/no-chords])})))
 
 (rf/reg-event-fx :replay
   (fn [{:keys [db]} _]
@@ -273,7 +278,7 @@
          :audio/play (:events tl)
          :later {:ms wait :event [:training/reveal round]}})
       {:db (assoc db :running false :phase :idle
-                  :error "No chords match your settings — enable some chords or inversions.")})))
+                  :error [:msg/no-chords])})))
 
 (rf/reg-event-fx :training/reveal
   (fn [{:keys [db]} [_ round]]
@@ -310,7 +315,7 @@
       (cond-> {:db (assoc db :current q :phase :imagine :graded nil :error nil)}
         (get-in db [:settings :imagine-root])
         (assoc :audio/play [[(t/root-midi (:root q)) 0 1.4]]))
-      {:db (assoc db :error "No chords match your settings — enable some chords or inversions.")})))
+      {:db (assoc db :error [:msg/no-chords])})))
 
 (rf/reg-event-fx :imagine/hear
   (fn [{:keys [db]} _]
@@ -348,7 +353,7 @@
           {:keys [events length marks voices]} (sketch/schedule slots (:sketch db))
           token (inc (get-in db [:sketch-play :token]))]
       (if (empty? events)
-        {:db (assoc db :error "Nothing to play — type some chords like  Dm9 | G13 | Cmaj9")}
+        {:db (assoc db :error [:msg/nothing-to-play])}
         {:db (assoc db :sketch-play {:playing true :token token :pos 0} :error nil)
          :audio/play {:events events :voices voices}
          :later (into [{:ms (* 1000 length) :event [:sketch/end token]}]
@@ -393,7 +398,7 @@
                         (cons sk)
                         (sort-by :name)
                         vec)]
-      {:db (assoc db :sketches sketches :flash (str "Saved “" (:name sk) "”."))
+      {:db (assoc db :sketches sketches :flash [:msg/saved (:name sk)])
        :save {:sketches sketches}})))
 
 (rf/reg-event-fx :sketch/load
@@ -408,12 +413,12 @@
   (fn [{:keys [db]} _]
     (let [nm (get-in db [:sketch :name])
           sketches (vec (remove #(= nm (:name %)) (:sketches db)))]
-      {:db (assoc db :sketches sketches :flash (str "Deleted “" nm "”."))
+      {:db (assoc db :sketches sketches :flash [:msg/deleted nm])
        :save {:sketches sketches}})))
 
 (rf/reg-event-fx :sketch/new
   (fn [{:keys [db]} _]
-    (save-sketch (assoc db :sketch (assoc default-sketch :name "Untitled" :text "") :sketch-sel nil :flash nil))))
+    (save-sketch (assoc db :sketch (assoc default-sketch :name (i18n/translate (get-in db [:settings :lang]) :ui/untitled {}) :text "") :sketch-sel nil :flash nil))))
 
 (rf/reg-event-db :stats/filter
   (fn [db [_ f]] (assoc db :stats-filter f)))
@@ -451,9 +456,7 @@
                           (t/identify root t/chords notes))]
           (if c
             (submit cofx (:id c) inv :midi)
-            {:db (assoc db :midi-msg (str "Couldn't match "
-                                          (str/join " " (map t/note-name notes))
-                                          " to a chord on " (t/note-names root) " — try again."))}))
+            {:db (assoc db :midi-msg [:msg/no-match (str/join " " (map t/note-name notes)) (t/note-names root)])}))
         {:db db}))))
 
 ;; ---------------------------------------------------------------- stats
@@ -478,9 +481,9 @@
                           (sort-by :t)
                           (take-last stats/max-attempts)
                           vec)]
-          {:db (assoc db :attempts merged :flash (str "Imported — " (count merged) " attempts total."))
+          {:db (assoc db :attempts merged :flash [:msg/imported (count merged)])
            :save {:attempts merged}})
-        {:db (assoc db :flash "That file doesn't look like a chordtrainer export.")}))))
+        {:db (assoc db :flash [:msg/bad-import])}))))
 
 ;; ---------------------------------------------------------------- keyboard
 

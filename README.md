@@ -1,6 +1,6 @@
 # Chord trainer
 
-Ear-training for chord qualities beyond plain triads: 7ths, sus/add, extensions and altered dominants, with inversions. Static re-frame SPA, works offline (PWA), stats kept in the browser (IndexedDB).
+Ear-training for chord qualities beyond plain triads: 7ths, sus/add, extensions and altered dominants, with inversions. English and Greek (`src/chordtrainer/i18n/`; chord symbols and note letters stay international). Static re-frame SPA, works offline (PWA), stats kept in the browser (IndexedDB).
 
 ## Modes
 
